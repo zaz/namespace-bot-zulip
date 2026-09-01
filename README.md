@@ -113,17 +113,17 @@ that relays messages into the Zulip thread.
 - Tool-approval prompts (`always_ask` policies) aren't serviced yet — the bot
   links you to the Anthropic console to continue those.
 
-### Claude Code fleet (`>` prefix)
+### Claude Code fleet (@-mention or DM)
 
-Messages prefixed with `>` drive a headless **Claude Code** session — one per
+@-mentioning the bot (or DMing it plain text) drives a headless **Claude Code** session — one per
 thread — running directly on the bot's machine. Unlike `%` (Anthropic runs the
 agent loop), here the bot host runs everything, so the agent can use whatever
 is installed there. With the Namespace `devbox` CLI authenticated on the host,
 that includes **spawning ephemeral worker devboxes** for large parallel tasks:
 
 ```
->render a 4000x4000 Mandelbrot using 4 workers and post progress
->now stitch the tiles and expire the workers    # same thread → same session
+@zulip-bot render a 4000x4000 Mandelbrot using 4 workers and post progress
+@zulip-bot now stitch the tiles and expire the workers   # same thread → same session
 ```
 
 - Requires the `claude` CLI on PATH (plus `ANTHROPIC_API_KEY` /
@@ -134,7 +134,7 @@ that includes **spawning ephemeral worker devboxes** for large parallel tasks:
 - The bot posts a "working…" ack, then the final reply. Runs happen in a
   background thread, so other messages keep working; `SHELL_BOT_FLEET_TIMEOUT`
   (default 600s) bounds a turn.
-- `>:reset` starts a fresh Claude Code session for the thread.
+- Mention the bot with `:reset` to start a fresh Claude Code session for the thread.
 
 ## Deploy on Namespace (namespace.so)
 

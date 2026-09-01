@@ -19,11 +19,12 @@ that executes tools in a Namespace Devbox — autonomous, can take minutes.
 Requires SHELL_BOT_AGENT_ID and SHELL_BOT_ENVIRONMENT_ID. `%:reset` starts a
 fresh session for the thread.
 
-Messages prefixed with `>` drive a headless Claude Code session (one per thread)
-running on the bot's own machine. It has full shell access there, so with the
-Namespace `devbox` CLI installed and authenticated it can spawn ephemeral worker
-devboxes for large parallel tasks and expire them when done. Requires the
-`claude` CLI on PATH. `>:reset` starts a fresh session for the thread.
+@-mentioning the bot with no other prefix (or DMing it plain text) drives a
+headless Claude Code session (one per thread) running on the bot's own machine.
+It has full shell access there, so with the Namespace `devbox` CLI installed
+and authenticated it can spawn ephemeral worker devboxes for large parallel
+tasks and expire them when done. Requires the `claude` CLI on PATH. Mention the
+bot with `:reset` to start a fresh session for the thread.
 
 SECURITY: this grants shell access to anyone allowed to talk to the bot. Keep
 the sender allowlist tight, run the bot as an unprivileged user, and treat the
@@ -72,8 +73,9 @@ Configuration (environment variables):
   SHELL_BOT_CLAUDE_MAX_HISTORY       Messages kept per thread before trimming (default: 20)
   SHELL_BOT_CLAUDE_MAX_CONVERSATIONS Max threads with Claude history (default: 200)
   SHELL_BOT_CLAUDE_SYSTEM    System prompt for the Claude assistant
-  SHELL_BOT_FLEET_PREFIX     Prefix that routes a message to a headless Claude
-                             Code session on the bot host (default: >)
+  SHELL_BOT_FLEET_PREFIX     Optional extra prefix that routes a message to the
+                             fleet session, besides @-mentions and DMs (default:
+                             none — `>` would collide with Zulip quote syntax)
   SHELL_BOT_FLEET_BIN        Claude Code executable (default: claude)
   SHELL_BOT_FLEET_CWD        Working directory for Claude Code sessions
                              (default: SHELL_BOT_CWD)
@@ -170,12 +172,15 @@ AGENT_MAX_SESSIONS = int(os.environ.get("SHELL_BOT_AGENT_MAX_SESSIONS", "100"))
 AGENT_WORKSPACE = os.environ.get("SHELL_BOT_AGENT_WORKSPACE", "default")
 
 # --- Claude Code fleet mode (per-thread local coding agent) ---
-# Messages prefixed with FLEET_PREFIX are handed to the Claude Code CLI running
-# headless on this machine. It gets full shell access here — including, if
-# installed and authenticated, the Namespace `devbox` CLI — so it can spawn
-# ephemeral worker devboxes for large parallel tasks and tear them down again.
-# One Claude Code session per thread; `>:reset` starts a fresh one.
-FLEET_PREFIX = os.environ.get("SHELL_BOT_FLEET_PREFIX", ">")
+# @-mentioning the bot with no other prefix (or DMing it plain text) hands the
+# message to the Claude Code CLI running headless on this machine. It gets full
+# shell access here — including, if installed and authenticated, the Namespace
+# `devbox` CLI — so it can spawn ephemeral worker devboxes for large parallel
+# tasks and tear them down again. One Claude Code session per thread; mention
+# the bot with `:reset` to start a fresh one. SHELL_BOT_FLEET_PREFIX optionally
+# adds a prefix trigger as well (off by default — `>` collides with Zulip's
+# quote syntax).
+FLEET_PREFIX = os.environ.get("SHELL_BOT_FLEET_PREFIX", "")
 FLEET_BIN = os.environ.get("SHELL_BOT_FLEET_BIN", "claude")
 FLEET_CWD = os.environ.get("SHELL_BOT_FLEET_CWD") or CWD
 FLEET_TIMEOUT = int(os.environ.get("SHELL_BOT_FLEET_TIMEOUT", "600"))
@@ -698,6 +703,10 @@ def handle_message(message: dict) -> None:
             return  # DMs disabled — ignore silently
 
     text = strip_mention(message["content"])
+    mentioned = (
+        "mentioned" in message.get("flags", [])
+        or text != message["content"].strip()  # a leading @-mention was stripped
+    )
     # Route by prefix: shell command, Claude message, or ignore.
     if text.startswith(COMMAND_PREFIX):
         mode = "shell"
@@ -711,8 +720,13 @@ def handle_message(message: dict) -> None:
     elif CLAUDE_PREFIX and text.startswith(CLAUDE_PREFIX):
         mode = "claude"
         body = text[len(CLAUDE_PREFIX):].strip()
+    elif mentioned or message["type"] == "private":
+        # No prefix, but the bot was addressed directly: talk to the fleet
+        # agent — the "just talk to it" interface.
+        mode = "fleet"
+        body = text
     else:
-        return  # no known prefix — ignore silently
+        return  # no known prefix and not addressed to us — ignore silently
 
     sender = message["sender_email"].lower()
     if sender not in ALLOWED_SENDERS and message["sender_id"] not in ALLOWED_SENDER_IDS:
@@ -768,7 +782,10 @@ def handle_message(message: dict) -> None:
     if mode == "fleet":
         if not body:
             safe_send(
-                reply_target(message, f"Give Claude Code a task: {FLEET_PREFIX}<task>")
+                reply_target(message,
+                             "Give me a task (mention me or DM me with it) and "
+                             "I'll work on it with full shell access. `:reset` "
+                             "starts this thread's session over.")
             )
             return
         if body == ":reset":
@@ -846,7 +863,10 @@ def main() -> None:
         print("Namespace agent mode disabled (set SHELL_BOT_AGENT_ID + "
               "SHELL_BOT_ENVIRONMENT_ID to enable).")
     if fleet_configured():
-        print(f"Claude Code fleet mode enabled: prefix '{FLEET_PREFIX}', "
+        trigger = "@-mention/DM"
+        if FLEET_PREFIX:
+            trigger += f" or prefix '{FLEET_PREFIX}'"
+        print(f"Claude Code fleet mode enabled: {trigger}, "
               f"cwd {FLEET_CWD or os.getcwd()}.")
     else:
         print(f"Claude Code fleet mode disabled ('{FLEET_BIN}' not on PATH).")
