@@ -107,6 +107,9 @@ ALLOWED_SENDERS = {
     for e in os.environ.get("SHELL_BOT_ALLOWED_SENDERS", "").split(",")
     if e.strip()
 }
+# SHELL_BOT_ALLOWED_SENDERS="*" opens the bot to every user it can see (the
+# channel/DM scoping still applies). For orgs where everyone is trusted.
+ALLOW_ALL_SENDERS = "*" in ALLOWED_SENDERS
 # Zulip orgs that hide real email addresses hand the API dummy addresses of the
 # form user<id>@<realm>, so email allowlists can't match there. Numeric user IDs
 # (visible on a user's Zulip profile) work regardless of email-privacy settings.
@@ -729,7 +732,9 @@ def handle_message(message: dict) -> None:
         return  # no known prefix and not addressed to us — ignore silently
 
     sender = message["sender_email"].lower()
-    if sender not in ALLOWED_SENDERS and message["sender_id"] not in ALLOWED_SENDER_IDS:
+    if (not ALLOW_ALL_SENDERS
+            and sender not in ALLOWED_SENDERS
+            and message["sender_id"] not in ALLOWED_SENDER_IDS):
         safe_send(
             reply_target(message,
                          f"Sorry, {message['sender_full_name']} — you're not "
@@ -841,7 +846,7 @@ def reply_target(message: dict, text: str) -> dict:
 
 
 def main() -> None:
-    if not ALLOWED_SENDERS and not ALLOWED_SENDER_IDS:
+    if not ALLOWED_SENDERS and not ALLOWED_SENDER_IDS and not ALLOW_ALL_SENDERS:
         sys.exit(
             "Refusing to start: the sender allowlist is empty. Set "
             "SHELL_BOT_ALLOWED_SENDERS (comma-separated emails) and/or "
