@@ -68,6 +68,13 @@ CLAUDE_SYSTEM = os.environ.get(
 )
 
 # --- Namespace Managed-Agent mode (`%` prefix, per-thread agent session) ---
+# The sessions API only exists on the first-party Anthropic platform, so this
+# mode gets its own credentials: gateway keys (e.g. Eden) that serve the `?`
+# assistant and fleet mode can't create Console-visible sessions.
+AGENT_API_KEY = (os.environ.get("SHELL_BOT_AGENT_API_KEY")
+                 or os.environ.get("ANTHROPIC_API_KEY"))
+AGENT_BASE_URL = (os.environ.get("SHELL_BOT_AGENT_BASE_URL")
+                  or "https://api.anthropic.com")
 AGENT_PREFIX = os.environ.get("SHELL_BOT_AGENT_PREFIX", "%")
 AGENT_ID = os.environ.get("SHELL_BOT_AGENT_ID")
 ENVIRONMENT_ID = os.environ.get("SHELL_BOT_ENVIRONMENT_ID")

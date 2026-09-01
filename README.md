@@ -104,7 +104,12 @@ that relays messages into the Zulip thread.
 ```
 
 - Requires `SHELL_BOT_AGENT_ID` and `SHELL_BOT_ENVIRONMENT_ID` (from `devbox
-  claude managed-agents setup-environment`), plus `ANTHROPIC_API_KEY`.
+  claude managed-agents setup-environment`), plus `SHELL_BOT_AGENT_API_KEY` —
+  a **first-party Anthropic platform key** from the org that owns the agent.
+  A gateway key (e.g. Eden) won't work here: gateways proxy message calls,
+  not the sessions API. Sessions are then visible and steerable in that
+  org's Claude Console, so the same run can be managed from Zulip **or**
+  from platform.claude.com in parallel.
 - The bot posts a "working…" ack, then the agent's reply. **Runs are autonomous
   and can take minutes**; the bot processes messages serially, so a long agent
   run blocks other bot messages until it finishes (`SHELL_BOT_AGENT_TIMEOUT`,
@@ -202,6 +207,8 @@ runs unless you attach a `persistent` volume.
 | `SHELL_BOT_CLAUDE_MAX_HISTORY` | `20` | Messages kept per thread before trimming |
 | `SHELL_BOT_CLAUDE_MAX_CONVERSATIONS` | `200` | Max threads with Claude history (LRU-evicted) |
 | `SHELL_BOT_CLAUDE_SYSTEM` | *(built-in)* | System prompt for the assistant |
+| `SHELL_BOT_AGENT_API_KEY` | falls back to `ANTHROPIC_API_KEY` | First-party Anthropic platform key for `%` sessions (Console visibility) |
+| `SHELL_BOT_AGENT_BASE_URL` | `https://api.anthropic.com` | Platform endpoint for `%` sessions; pinned so a gateway `ANTHROPIC_BASE_URL` doesn't leak in |
 
 ## Security notes
 

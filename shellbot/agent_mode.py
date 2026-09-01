@@ -11,8 +11,9 @@ import queue
 import threading
 import time
 
-from .claude_mode import claude_client
 from .config import (
+    AGENT_API_KEY,
+    AGENT_BASE_URL,
     AGENT_ID,
     AGENT_MAX_SESSIONS,
     AGENT_TIMEOUT,
@@ -20,13 +21,33 @@ from .config import (
     ENVIRONMENT_ID,
 )
 
+
+def make_agent_client():
+    """Anthropic *platform* client for the sessions API, or None.
+
+    Deliberately separate from claude_mode's client: that one may point at a
+    gateway (ANTHROPIC_BASE_URL), which proxies plain message calls but not
+    the sessions API. This client pins the base URL to the platform so `%`
+    sessions land in the org's Claude Console (platform.claude.com).
+    """
+    if not AGENT_API_KEY:
+        return None
+    try:
+        import anthropic
+    except ImportError:
+        return None
+    return anthropic.Anthropic(api_key=AGENT_API_KEY, base_url=AGENT_BASE_URL)
+
+
+agent_client = make_agent_client()
+
 # One Managed Agent session id per thread, LRU-ordered.
 AGENT_SESSIONS: "collections.OrderedDict[str, str]" = collections.OrderedDict()
 AGENT_SESSIONS_LOCK = threading.Lock()
 
 
 def agent_configured() -> bool:
-    return bool(claude_client and AGENT_ID and ENVIRONMENT_ID)
+    return bool(agent_client and AGENT_ID and ENVIRONMENT_ID)
 
 
 def session_url(session_id: str) -> str:
@@ -48,7 +69,7 @@ def _get_or_create_agent_session(key: str) -> str:
     # Create outside the lock (network call). Override the toolset to auto-allow
     # so the agent runs tools without pausing for per-call approval (the sender
     # is already allowlisted and it's the user's own Devbox).
-    session = claude_client.beta.sessions.create(
+    session = agent_client.beta.sessions.create(
         agent={
             "type": "agent_with_overrides",
             "id": AGENT_ID,
@@ -87,7 +108,7 @@ def _drain_session(session_id: str, prompt: str, out_q: "queue.Queue") -> None:
 
     def workers_polling() -> "int | None":
         try:
-            stats = claude_client.beta.environments.work.stats(
+            stats = agent_client.beta.environments.work.stats(
                 environment_id=ENVIRONMENT_ID
             )
             return getattr(stats, "workers_polling", None)
@@ -96,7 +117,7 @@ def _drain_session(session_id: str, prompt: str, out_q: "queue.Queue") -> None:
             return None
 
     try:
-        claude_client.beta.sessions.events.send(
+        agent_client.beta.sessions.events.send(
             session_id=session_id,
             events=[{"type": "user.message",
                      "content": [{"type": "text", "text": prompt}]}],
@@ -113,7 +134,7 @@ def _drain_session(session_id: str, prompt: str, out_q: "queue.Queue") -> None:
             return
         time.sleep(3)
         try:
-            events = claude_client.beta.sessions.events.list(session_id=session_id).data
+            events = agent_client.beta.sessions.events.list(session_id=session_id).data
         except Exception as exc:
             out_q.put(("error", f"[agent error: {exc}]"))
             return
@@ -159,7 +180,8 @@ def run_agent(key: str, prompt: str) -> str:
     if not agent_configured():
         return ("The Namespace agent mode isn't configured — set "
                 "SHELL_BOT_AGENT_ID and SHELL_BOT_ENVIRONMENT_ID (and "
-                "ANTHROPIC_API_KEY) to enable it.")
+                "SHELL_BOT_AGENT_API_KEY, a first-party Anthropic platform "
+                "key) to enable it.")
     # Try up to twice: a reused thread session may be stuck mid-tool-call (e.g.
     # a prior turn timed out or ran during an outage), which makes a new
     # user.message 400. On error we drop the session and retry once fresh.
