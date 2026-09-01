@@ -29,7 +29,16 @@ with the output. Direct-message it a command, or @-mention it in a stream.
    python shell_bot.py
    ```
 
-   The bot refuses to start if the allowlist is empty.
+   On organizations that **hide real email addresses**, the API delivers dummy
+   `user<id>@<realm>` addresses, so an email allowlist never matches. Allowlist
+   numeric Zulip user IDs instead (shown on a user's profile in the Zulip UI):
+
+   ```bash
+   export SHELL_BOT_ALLOWED_SENDER_IDS="1193774,1200001"
+   ```
+
+   A sender is authorized if their email **or** user ID is allowlisted. The bot
+   refuses to start if both allowlists are empty.
 
 ## Usage
 
@@ -152,7 +161,8 @@ runs unless you attach a `persistent` volume.
 | Variable | Default | Purpose |
 |---|---|---|
 | `ZULIPRC` | `zuliprc` | Path to the bot's credentials file |
-| `SHELL_BOT_ALLOWED_SENDERS` | *(required)* | Comma-separated sender emails allowed to run commands |
+| `SHELL_BOT_ALLOWED_SENDERS` | *(empty)* | Comma-separated sender emails allowed to run commands (won't match on orgs that hide emails — use IDs) |
+| `SHELL_BOT_ALLOWED_SENDER_IDS` | *(empty)* | Comma-separated numeric Zulip user IDs allowed to run commands; at least one allowlist is required |
 | `SHELL_BOT_ALLOWED_STREAMS` | *(all)* | Comma-separated channel names the bot acts in; empty = all |
 | `SHELL_BOT_ALLOW_DMS` | `true` (`false` if streams set) | Whether to honor direct messages |
 | `SHELL_BOT_PREFIX` | `!` | Messages must start with this to run as a command; others ignored |

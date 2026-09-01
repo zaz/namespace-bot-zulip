@@ -20,8 +20,8 @@ Requires SHELL_BOT_AGENT_ID and SHELL_BOT_ENVIRONMENT_ID. `%:reset` starts a
 fresh session for the thread.
 
 SECURITY: this grants shell access to anyone allowed to talk to the bot. Keep
-SHELL_BOT_ALLOWED_SENDERS tight, run the bot as an unprivileged user, and treat
-the bot's API key like a password.
+the sender allowlist tight, run the bot as an unprivileged user, and treat the
+bot's API key like a password.
 
 Configuration (environment variables):
   ZULIP_EMAIL / ZULIP_API_KEY / ZULIP_SITE
@@ -31,8 +31,18 @@ Configuration (environment variables):
   ZULIPRC                    Path to the bot's zuliprc file (default: ./zuliprc),
                              used only when the ZULIP_* vars above are not set.
   SHELL_BOT_ALLOWED_SENDERS  Comma-separated sender emails allowed to run
-                             commands. REQUIRED — the bot refuses everyone if
-                             this is empty.
+                             commands. Note: organizations that hide real email
+                             addresses deliver dummy user<id>@<realm> addresses
+                             to the API, so real emails never match there — use
+                             SHELL_BOT_ALLOWED_SENDER_IDS instead.
+  SHELL_BOT_ALLOWED_SENDER_IDS
+                             Comma-separated numeric Zulip user IDs allowed to
+                             run commands (shown on a user's profile in the
+                             Zulip UI; stable regardless of email-privacy
+                             settings). A sender is authorized if their email
+                             OR their user ID is allowlisted. At least one of
+                             the two allowlists must be non-empty — the bot
+                             refuses to start otherwise.
   SHELL_BOT_ALLOWED_STREAMS  Comma-separated channel (stream) names the bot will
                              act in. If empty, all channels are allowed. When
                              set, DMs are ignored unless SHELL_BOT_ALLOW_DMS=true.
@@ -76,6 +86,14 @@ ALLOWED_SENDERS = {
     e.strip().lower()
     for e in os.environ.get("SHELL_BOT_ALLOWED_SENDERS", "").split(",")
     if e.strip()
+}
+# Zulip orgs that hide real email addresses hand the API dummy addresses of the
+# form user<id>@<realm>, so email allowlists can't match there. Numeric user IDs
+# (visible on a user's Zulip profile) work regardless of email-privacy settings.
+ALLOWED_SENDER_IDS = {
+    int(i.strip())
+    for i in os.environ.get("SHELL_BOT_ALLOWED_SENDER_IDS", "").split(",")
+    if i.strip()
 }
 ALLOWED_STREAMS = {
     s.strip().lower()
@@ -586,7 +604,7 @@ def handle_message(message: dict) -> None:
         return  # no known prefix — ignore silently
 
     sender = message["sender_email"].lower()
-    if sender not in ALLOWED_SENDERS:
+    if sender not in ALLOWED_SENDERS and message["sender_id"] not in ALLOWED_SENDER_IDS:
         safe_send(
             reply_target(message,
                          f"Sorry, {message['sender_full_name']} — you're not "
@@ -668,13 +686,16 @@ def reply_target(message: dict, text: str) -> dict:
 
 
 def main() -> None:
-    if not ALLOWED_SENDERS:
+    if not ALLOWED_SENDERS and not ALLOWED_SENDER_IDS:
         sys.exit(
-            "Refusing to start: SHELL_BOT_ALLOWED_SENDERS is empty. Set it to a "
-            "comma-separated list of sender emails allowed to run commands."
+            "Refusing to start: the sender allowlist is empty. Set "
+            "SHELL_BOT_ALLOWED_SENDERS (comma-separated emails) and/or "
+            "SHELL_BOT_ALLOWED_SENDER_IDS (comma-separated Zulip user IDs; "
+            "required on orgs that hide real email addresses)."
         )
     print(f"Shell bot running as {BOT_EMAIL} (id {BOT_ID}).")
-    print(f"Allowed senders: {', '.join(sorted(ALLOWED_SENDERS))}")
+    allowed = sorted(ALLOWED_SENDERS) + [str(i) for i in sorted(ALLOWED_SENDER_IDS)]
+    print(f"Allowed senders: {', '.join(allowed)}")
     print(f"Per-thread shells enabled (max {MAX_SESSIONS}); shell prefix '{COMMAND_PREFIX}'.")
     if claude_client is not None:
         print(f"Claude assistant enabled: model {CLAUDE_MODEL}, prefix '{CLAUDE_PREFIX}'.")
