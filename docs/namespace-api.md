@@ -175,6 +175,42 @@ attribution. With a named token per bot (§1), every box the agent creates is
 attributable to the bot rather than to whoever's login token it borrowed —
 that alone is worth the switch.
 
+## What we actually tested (2026-09-01, live against the workspace)
+
+Findings from minting and using real scoped tokens:
+
+- **Non-admins can mint user-scoped tokens** (`--user`); tenant-wide tokens
+  need a workspace admin ("Only workspace administrators can create
+  tenant-wide tokens"). `nsc token list`/`revoke` also need admin
+  (`token/revokable:list|revoke`) — so ask Tobias to mint/manage the
+  production token, or accept that user-minted ones can't be self-revoked
+  (keep expiry short).
+- **Wildcard actions are rejected** in revocable tokens
+  (`requested permissions are not allowed in revokable tokens: [instance:*]`)
+  — enumerate actions explicitly. Full vocabulary: docs/security/permissions
+  (`devbox`: activate/create/expire/fetch/list/update; `instance`: create/
+  destroy/dial_host/exec/get/list/refresh/release/resume/ssh/suspend/wait).
+- **Control plane works under a scoped token**: `nsc create` (ephemeral
+  instance), `nsc list`, `nsc destroy --force` all succeeded with a token
+  granting only instance/devbox actions, and `nsc token list` was correctly
+  denied. Use `NSC_TOKEN_FILE=<path>`; mind `-o json`/`--force` — several
+  commands otherwise want a TTY.
+- **The data plane rejects revocable tokens**: `nsc ssh` and
+  `nsc instance upload` fail with `websocket: bad handshake` against
+  `wss://gate.<site>.nscluster.cloud/<id>/22` while the same commands succeed
+  with the full login credential, same instance, same moment. Injected SSH
+  keys don't help — the websocket *transport* is what authenticates. **Ask
+  Namespace support whether the ssh gate can accept revocable tokens.**
+- The `devbox` CLI has no token-file support at all (browser `devbox login`
+  only), so scoped tokens currently mean driving workers with `nsc`
+  (instances), not `devbox`.
+
+**Practical consequence for the bot today**: the scoped token cleanly covers
+spawn/list/expire (the blast-radius concern), but executing commands on
+workers still needs a full credential somewhere. Interim: keep the full
+workload credential on the execution box for ssh, use the scoped token for
+lifecycle operations, and revisit once support answers on the gate.
+
 ## Defense-in-depth summary
 
 | Layer | Mechanism | Status |
