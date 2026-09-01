@@ -19,6 +19,12 @@ that executes tools in a Namespace Devbox — autonomous, can take minutes.
 Requires SHELL_BOT_AGENT_ID and SHELL_BOT_ENVIRONMENT_ID. `%:reset` starts a
 fresh session for the thread.
 
+Messages prefixed with `>` drive a headless Claude Code session (one per thread)
+running on the bot's own machine. It has full shell access there, so with the
+Namespace `devbox` CLI installed and authenticated it can spawn ephemeral worker
+devboxes for large parallel tasks and expire them when done. Requires the
+`claude` CLI on PATH. `>:reset` starts a fresh session for the thread.
+
 SECURITY: this grants shell access to anyone allowed to talk to the bot. Keep
 the sender allowlist tight, run the bot as an unprivileged user, and treat the
 bot's API key like a password.
@@ -66,18 +72,30 @@ Configuration (environment variables):
   SHELL_BOT_CLAUDE_MAX_HISTORY       Messages kept per thread before trimming (default: 20)
   SHELL_BOT_CLAUDE_MAX_CONVERSATIONS Max threads with Claude history (default: 200)
   SHELL_BOT_CLAUDE_SYSTEM    System prompt for the Claude assistant
+  SHELL_BOT_FLEET_PREFIX     Prefix that routes a message to a headless Claude
+                             Code session on the bot host (default: >)
+  SHELL_BOT_FLEET_BIN        Claude Code executable (default: claude)
+  SHELL_BOT_FLEET_CWD        Working directory for Claude Code sessions
+                             (default: SHELL_BOT_CWD)
+  SHELL_BOT_FLEET_TIMEOUT    Per-turn timeout in seconds (default: 600)
+  SHELL_BOT_FLEET_MAX_SESSIONS  Max threads with a live Claude Code session
+                             before the least-recently-used is dropped
+                             (default: 100)
 """
 
 import collections
+import json
 import os
 import queue
 import re
 import select
+import shutil
 import signal
 import subprocess
 import sys
 import threading
 import time
+import uuid
 
 import zulip
 
@@ -150,6 +168,25 @@ ENVIRONMENT_ID = os.environ.get("SHELL_BOT_ENVIRONMENT_ID")
 AGENT_TIMEOUT = int(os.environ.get("SHELL_BOT_AGENT_TIMEOUT", "300"))
 AGENT_MAX_SESSIONS = int(os.environ.get("SHELL_BOT_AGENT_MAX_SESSIONS", "100"))
 AGENT_WORKSPACE = os.environ.get("SHELL_BOT_AGENT_WORKSPACE", "default")
+
+# --- Claude Code fleet mode (per-thread local coding agent) ---
+# Messages prefixed with FLEET_PREFIX are handed to the Claude Code CLI running
+# headless on this machine. It gets full shell access here — including, if
+# installed and authenticated, the Namespace `devbox` CLI — so it can spawn
+# ephemeral worker devboxes for large parallel tasks and tear them down again.
+# One Claude Code session per thread; `>:reset` starts a fresh one.
+FLEET_PREFIX = os.environ.get("SHELL_BOT_FLEET_PREFIX", ">")
+FLEET_BIN = os.environ.get("SHELL_BOT_FLEET_BIN", "claude")
+FLEET_CWD = os.environ.get("SHELL_BOT_FLEET_CWD") or CWD
+FLEET_TIMEOUT = int(os.environ.get("SHELL_BOT_FLEET_TIMEOUT", "600"))
+FLEET_MAX_SESSIONS = int(os.environ.get("SHELL_BOT_FLEET_MAX_SESSIONS", "100"))
+
+# Claude Code needs the Anthropic credentials that SHELL_ENV deliberately
+# strips; pass those through, but keep the Zulip key and bot config hidden.
+FLEET_ENV = dict(SHELL_ENV)
+for _var in ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"):
+    if os.environ.get(_var):
+        FLEET_ENV[_var] = os.environ[_var]
 
 def make_client() -> zulip.Client:
     """Build a Zulip client from ZULIP_* env vars, or fall back to a zuliprc."""
@@ -562,6 +599,77 @@ def run_agent(key: str, prompt: str) -> str:
     return text or "[the agent finished with no message]"
 
 
+# One Claude Code session id per thread, LRU-ordered.
+FLEET_SESSIONS: "collections.OrderedDict[str, str]" = collections.OrderedDict()
+FLEET_SESSIONS_LOCK = threading.Lock()
+
+
+def fleet_configured() -> bool:
+    return shutil.which(FLEET_BIN) is not None
+
+
+def reset_fleet_session(key: str) -> None:
+    with FLEET_SESSIONS_LOCK:
+        FLEET_SESSIONS.pop(key, None)
+
+
+def run_fleet(key: str, task: str) -> str:
+    """Run one turn of the thread's Claude Code session (headless CLI)."""
+    if not fleet_configured():
+        return (f"Claude Code isn't installed on the bot host (`{FLEET_BIN}` "
+                "not found on PATH), so fleet mode is disabled.")
+
+    with FLEET_SESSIONS_LOCK:
+        sid = FLEET_SESSIONS.get(key)
+        if sid:
+            FLEET_SESSIONS.move_to_end(key)
+
+    cmd = [FLEET_BIN, "-p", task,
+           "--output-format", "json",
+           "--permission-mode", "bypassPermissions"]
+    if CLAUDE_MODEL:
+        cmd += ["--model", CLAUDE_MODEL]
+    # First turn mints a session id; later turns resume it, so the thread keeps
+    # its context. Resuming can fork to a new id — the result JSON tells us the
+    # id to resume next time.
+    cmd += ["--resume", sid] if sid else ["--session-id", str(uuid.uuid4())]
+
+    try:
+        proc = subprocess.run(
+            cmd, cwd=FLEET_CWD, env=FLEET_ENV, stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, timeout=FLEET_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return (f"[the fleet agent was still working after {FLEET_TIMEOUT}s "
+                "and was stopped — try a smaller task, or raise "
+                "SHELL_BOT_FLEET_TIMEOUT]")
+    except OSError as exc:
+        return f"[couldn't launch Claude Code: {exc}]"
+
+    out = (proc.stdout or "").strip()
+    reply, next_sid = "", sid
+    try:
+        data = json.loads(out.splitlines()[-1]) if out else {}
+        reply = (data.get("result") or "").strip()
+        next_sid = data.get("session_id") or next_sid
+    except (ValueError, IndexError):
+        reply = out  # not JSON — pass whatever the CLI printed along
+
+    if proc.returncode != 0 and not reply:
+        err = (proc.stderr or out or "").strip()
+        reset_fleet_session(key)  # the session may be unusable — start fresh
+        return f"[fleet agent failed (exit {proc.returncode}): {err[-500:]}]"
+
+    if next_sid:
+        with FLEET_SESSIONS_LOCK:
+            FLEET_SESSIONS[key] = next_sid
+            FLEET_SESSIONS.move_to_end(key)
+            while len(FLEET_SESSIONS) > FLEET_MAX_SESSIONS:
+                FLEET_SESSIONS.popitem(last=False)
+
+    return reply or "[the fleet agent finished with no message]"
+
+
 def strip_mention(content: str) -> str:
     """Remove a leading @-mention of the bot from the message content."""
     for mention in (f"@**{PROFILE['full_name']}**", f"@_**{PROFILE['full_name']}**"):
@@ -597,6 +705,9 @@ def handle_message(message: dict) -> None:
     elif AGENT_PREFIX and text.startswith(AGENT_PREFIX):
         mode = "agent"
         body = text[len(AGENT_PREFIX):].strip()
+    elif FLEET_PREFIX and text.startswith(FLEET_PREFIX):
+        mode = "fleet"
+        body = text[len(FLEET_PREFIX):].strip()
     elif CLAUDE_PREFIX and text.startswith(CLAUDE_PREFIX):
         mode = "claude"
         body = text[len(CLAUDE_PREFIX):].strip()
@@ -654,6 +765,33 @@ def handle_message(message: dict) -> None:
         threading.Thread(target=_run_and_reply, daemon=True).start()
         return
 
+    if mode == "fleet":
+        if not body:
+            safe_send(
+                reply_target(message, f"Give Claude Code a task: {FLEET_PREFIX}<task>")
+            )
+            return
+        if body == ":reset":
+            reset_fleet_session(key)
+            safe_send(reply_target(message, "Fleet session for this thread was reset."))
+            return
+        safe_send(
+            reply_target(message, "On it — running Claude Code… (this can take a while)")
+        )
+
+        # Same deal as agent mode: don't block the message loop on a long run.
+        def _run_fleet_and_reply(key=key, body=body, message=message):
+            try:
+                reply = run_fleet(key, body)
+            except Exception as exc:  # pragma: no cover - defensive
+                reply = f"[fleet error: {exc}]"
+            if len(reply) > MAX_OUTPUT:
+                reply = reply[:MAX_OUTPUT] + "\n[output truncated]"
+            safe_send(reply_target(message, reply))
+
+        threading.Thread(target=_run_fleet_and_reply, daemon=True).start()
+        return
+
     # mode == "claude"
     if not body:
         safe_send(
@@ -707,6 +845,11 @@ def main() -> None:
     else:
         print("Namespace agent mode disabled (set SHELL_BOT_AGENT_ID + "
               "SHELL_BOT_ENVIRONMENT_ID to enable).")
+    if fleet_configured():
+        print(f"Claude Code fleet mode enabled: prefix '{FLEET_PREFIX}', "
+              f"cwd {FLEET_CWD or os.getcwd()}.")
+    else:
+        print(f"Claude Code fleet mode disabled ('{FLEET_BIN}' not on PATH).")
     client.call_on_each_message(handle_message)
 
 
