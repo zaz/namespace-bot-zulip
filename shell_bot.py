@@ -679,21 +679,26 @@ def run_fleet(key: str, task: str) -> str:
     return reply or "[the fleet agent finished with no message]"
 
 # --- Night-mode ack ---
-# Between 02:00 and 06:30 local time the fleet ack gets a sleepier wording.
+# 22:00–02:00 local: kettle on; 02:00–06:30: coffee. Otherwise the plain ack.
 NIGHT_TZ = os.environ.get("SHELL_BOT_TZ", "Europe/London")
 FLEET_ACK_DAY = "On it — running Claude Code… (this can take a while)"
 FLEET_ACK_NIGHT = "Getting some coffee… (this can take a while)"
+FLEET_ACK_EVENING = "Ah, a late one. Let me put the kettle on… (this can take a while)"
 
 
 def fleet_ack() -> str:
-    """The 'working on it' message, with a night-time variant (02:00–06:30)."""
+    """The 'working on it' message, with evening (22:00–02:00) and night (02:00–06:30) variants."""
     try:
         from zoneinfo import ZoneInfo
         now = datetime.datetime.now(ZoneInfo(NIGHT_TZ))
     except Exception:
         now = datetime.datetime.now()
     minutes = now.hour * 60 + now.minute
-    return FLEET_ACK_NIGHT if 2 * 60 <= minutes < 6 * 60 + 30 else FLEET_ACK_DAY
+    if 2 * 60 <= minutes < 6 * 60 + 30:
+        return FLEET_ACK_NIGHT
+    if minutes >= 22 * 60 or minutes < 2 * 60:
+        return FLEET_ACK_EVENING
+    return FLEET_ACK_DAY
 
 
 def strip_mention(content: str) -> str:
