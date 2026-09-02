@@ -86,6 +86,7 @@ Configuration (environment variables):
 """
 
 import collections
+import datetime
 import json
 import os
 import queue
@@ -677,6 +678,23 @@ def run_fleet(key: str, task: str) -> str:
 
     return reply or "[the fleet agent finished with no message]"
 
+# --- Night-mode ack ---
+# Between 02:00 and 06:30 local time the fleet ack gets a sleepier wording.
+NIGHT_TZ = os.environ.get("SHELL_BOT_TZ", "Europe/London")
+FLEET_ACK_DAY = "On it — running Claude Code… (this can take a while)"
+FLEET_ACK_NIGHT = "Getting some coffee… (this can take a while)"
+
+
+def fleet_ack() -> str:
+    """The 'working on it' message, with a night-time variant (02:00–06:30)."""
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.datetime.now(ZoneInfo(NIGHT_TZ))
+    except Exception:
+        now = datetime.datetime.now()
+    minutes = now.hour * 60 + now.minute
+    return FLEET_ACK_NIGHT if 2 * 60 <= minutes < 6 * 60 + 30 else FLEET_ACK_DAY
+
 
 def strip_mention(content: str) -> str:
     """Remove a leading @-mention of the bot from the message content."""
@@ -798,7 +816,7 @@ def handle_message(message: dict) -> None:
             safe_send(reply_target(message, "Fleet session for this thread was reset."))
             return
         safe_send(
-            reply_target(message, "On it — running Claude Code… (this can take a while)")
+            reply_target(message, fleet_ack())
         )
 
         # Same deal as agent mode: don't block the message loop on a long run.
