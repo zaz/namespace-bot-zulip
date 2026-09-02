@@ -10,7 +10,12 @@ REPO=https://github.com/zaz/namespace-bot-zulip.git
 BRANCH=${HEAD_BRANCH:-feat/claude-code-fleet}
 cd /home/devbox
 mkdir -p .local/bin zulip-ai-bot .config/ns agent-workspace .namespace/ssh
-[ -d shell-bot/.git ] || git clone -q -b "$BRANCH" "$REPO" shell-bot
+if [ ! -d shell-bot/.git ]; then
+  # A pre-placed ~/shell-bot/.env (secrets arrive before code) must survive the clone.
+  git clone -q -b "$BRANCH" "$REPO" shell-bot.new
+  [ -d shell-bot ] && cp -a shell-bot/. shell-bot.new/
+  rm -rf shell-bot && mv shell-bot.new shell-bot
+fi
 cd shell-bot
 git fetch -q && git checkout -q "$BRANCH" && git pull -q --ff-only
 [ -x .venv/bin/python ] || python3 -m venv .venv
