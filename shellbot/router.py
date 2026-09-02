@@ -15,6 +15,7 @@ from .config import (
     COMMAND_PREFIX,
     FLEET_PREFIX,
     MAX_OUTPUT,
+    fleet_ack,
 )
 from .fleet_mode import reset_fleet_session, run_fleet
 from .shell_mode import format_reply, reset_session, run_in_thread
@@ -127,7 +128,7 @@ def handle_message(message: dict) -> None:
             safe_send(reply_target(message, "Fleet session for this thread was reset."))
             return
         safe_send(
-            reply_target(message, "On it — running Claude Code… (this can take a while)")
+            reply_target(message, fleet_ack())
         )
 
         # Same deal as agent mode: don't block the message loop on a long run.

@@ -3,6 +3,7 @@
 See the README's Configuration table for what each variable does.
 """
 
+import datetime
 import os
 
 ZULIPRC = os.environ.get("ZULIPRC", "zuliprc")
@@ -97,3 +98,20 @@ FLEET_ENV = dict(SHELL_ENV)
 for _var in ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"):
     if os.environ.get(_var):
         FLEET_ENV[_var] = os.environ[_var]
+
+
+# --- Night-mode ack (02:00–06:30 local gets a sleepier wording) ---
+NIGHT_TZ = os.environ.get("SHELL_BOT_TZ", "Europe/London")
+FLEET_ACK_DAY = "On it — running Claude Code… (this can take a while)"
+FLEET_ACK_NIGHT = "Getting some coffee… (this can take a while)"
+
+
+def fleet_ack() -> str:
+    """The 'working on it' message, with a night-time variant (02:00–06:30)."""
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.datetime.now(ZoneInfo(NIGHT_TZ))
+    except Exception:
+        now = datetime.datetime.now()
+    minutes = now.hour * 60 + now.minute
+    return FLEET_ACK_NIGHT if 2 * 60 <= minutes < 6 * 60 + 30 else FLEET_ACK_DAY
