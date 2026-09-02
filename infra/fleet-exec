@@ -1,0 +1,16 @@
+#!/bin/bash
+# fleet-exec: run headless Claude Code on the fleet workhorse instead of the
+# head box. Drop-in replacement for the `claude` CLI in shell-bot fleet mode
+# (SHELL_BOT_FLEET_BIN=fleet-exec). Arguments are shipped as base64-encoded
+# NUL-separated argv, so arbitrary task text (quotes, backticks, $(), any
+# shell metacharacters) can never be parsed by the remote shell.
+#
+# Credentials: the workhorse reads its own ~/.fleet-env; nothing is sent
+# from here.
+
+WORKHORSE=${FLEET_WORKHORSE:-fleet-workhorse.devbox.namespace}
+
+payload=$(printf '%s\0' "$@" | base64 -w0)
+
+exec ssh -o BatchMode=yes -o ConnectTimeout=15 "$WORKHORSE" \
+  "/home/devbox/fleet-run.sh $payload"
