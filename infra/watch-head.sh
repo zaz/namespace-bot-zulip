@@ -1,5 +1,5 @@
 #!/bin/bash
-# watch-head.sh — runs on fleet-workhorse. Every 5 min: ssh to the head (this wakes a
+# watch-head.sh — runs on fleet-workhorse. Every minute: ssh to the head (this wakes a
 # stopped devbox and counts as activity), start the bot supervisor if the bot is down,
 # and make sure the head's reverse watchdog is running. Nothing depends on a laptop.
 HEAD=${HEAD_BOX:-zulip-head.devbox.namespace}
@@ -22,5 +22,5 @@ while true; do
     *BOT-UP*) ;;
     *) echo "$(date -Is) ssh failed: ${out: -200}" >> "$LOG" ;;
   esac
-  sleep 300
+  sleep 60
 done

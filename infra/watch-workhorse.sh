@@ -1,5 +1,5 @@
 #!/bin/bash
-# watch-workhorse.sh — runs on the head. Every 5 min: ssh to the workhorse (wakes it
+# watch-workhorse.sh — runs on the head. Every minute: ssh to the workhorse (wakes it
 # if stopped, counts as activity) and restart its watch-head.sh if it died.
 WH=${WORKHORSE_BOX:-fleet-workhorse.devbox.namespace}
 LOG=/home/devbox/watch-workhorse.log
@@ -19,5 +19,5 @@ while true; do
     *WD-UP*) ;;
     *) echo "$(date -Is) ssh failed: ${out: -200}" >> "$LOG" ;;
   esac
-  sleep 300
+  sleep 60
 done
