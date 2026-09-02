@@ -11,6 +11,9 @@ if [ -f "$LOCK" ]; then
 fi
 echo $$ > "$LOCK"
 cd /home/devbox/shell-bot || exit 1
+# Namespace idle detection: any file under /.namespace/tasks marks the devbox busy,
+# so it is never auto-stopped while the bot service is meant to be running.
+mkdir -p /.namespace/tasks 2>/dev/null; echo 'zulip bot service' > /.namespace/tasks/zulip-bot 2>/dev/null
 export PATH="/home/devbox/.local/bin:$PATH"
 while true; do
   set -a; . ./.env; set +a

@@ -7,6 +7,7 @@ LOG=/home/devbox/watch-head.log
 LOCK=/home/devbox/.watch-head.pid
 if [ -f "$LOCK" ]; then o=$(cat "$LOCK"); kill -0 "$o" 2>/dev/null && grep -q watch-head "/proc/$o/cmdline" 2>/dev/null && { echo "already running ($o)"; exit 0; }; fi
 echo $$ > "$LOCK"
+mkdir -p /.namespace/tasks 2>/dev/null; echo 'fleet watchdog' > /.namespace/tasks/fleet-watchdog 2>/dev/null  # keeps this box from idle-stopping
 PEER=$HEAD
 # Keep-alive: hold a persistent ssh session open into the peer so it always has an
 # active inbound connection (short pings did not stop the platform idle-stopping it).
