@@ -238,6 +238,34 @@ def safe_send(request: dict):
         return _raw_send(request)
 
 
+def send_long(message: dict, text: str, limit: int = 9000) -> None:
+    """Post a reply, splitting it into several Zulip messages if it is long.
+
+    Zulip caps a message at 10,000 characters. Split on paragraph boundaries
+    where possible so tables and code blocks are less likely to be cut, and
+    never drop content: long agent reports often carry the question or the
+    key result at the end.
+    """
+    chunks, buf = [], ""
+    for para in text.split("\n\n"):
+        cand = (buf + "\n\n" + para) if buf else para
+        if len(cand) <= limit:
+            buf = cand
+            continue
+        if buf:
+            chunks.append(buf)
+        while len(para) > limit:  # a single oversized paragraph
+            chunks.append(para[:limit])
+            para = para[limit:]
+        buf = para
+    if buf:
+        chunks.append(buf)
+    n = len(chunks)
+    for i, chunk in enumerate(chunks, 1):
+        suffix = f"\n\n*(part {i}/{n})*" if n > 1 else ""
+        safe_send(reply_target(message, chunk + suffix))
+
+
 class ShellSession:
     """A long-lived bash process backing one Zulip thread.
 
@@ -802,7 +830,7 @@ def handle_message(message: dict) -> None:
                 reply = run_agent(key, body)
             except Exception as exc:  # pragma: no cover - defensive
                 reply = f"[agent error: {exc}]"
-            safe_send(reply_target(message, reply))
+            send_long(message, reply)
 
         threading.Thread(target=_run_and_reply, daemon=True).start()
         return
@@ -830,9 +858,7 @@ def handle_message(message: dict) -> None:
                 reply = run_fleet(key, body)
             except Exception as exc:  # pragma: no cover - defensive
                 reply = f"[fleet error: {exc}]"
-            if len(reply) > MAX_OUTPUT:
-                reply = reply[:MAX_OUTPUT] + "\n[output truncated]"
-            safe_send(reply_target(message, reply))
+            send_long(message, reply)
 
         threading.Thread(target=_run_fleet_and_reply, daemon=True).start()
         return
