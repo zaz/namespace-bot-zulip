@@ -1,0 +1,30 @@
+# Second, Namespace-independent leg of the bot's self-healing: every 5 minutes,
+# start the head and workhorse devboxes if the platform stopped them (this
+# workspace stops every instance 3h after boot; a stopped devbox only restarts
+# on a connection/start call). Needs repository secret NSC_TOKEN_JSON = the
+# contents of a token file from:
+#   nsc token create --user --name zulip-pinger --expires_in 365d \
+#     --grant '{"resource_type":"devbox","resource_id":"*","actions":["activate","fetch","list"]}' \
+#     --token_file token.json
+name: wake-devboxes
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-audit --no-fund @namespacelabs/sdk
+      - run: printf '%s' "$NSC_TOKEN_JSON" > "$RUNNER_TEMP/token.json"
+        env:
+          NSC_TOKEN_JSON: ${{ secrets.NSC_TOKEN_JSON }}
+      - run: node infra/wake-devboxes.mjs
+        env:
+          NSC_TOKEN_FILE: ${{ runner.temp }}/token.json
+          BOXES: zulip-bot-head,fleet-workhorse
