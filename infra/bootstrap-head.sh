@@ -6,18 +6,21 @@
 #   ~/shell-bot/.env   ~/zulip-ai-bot/zuliprc   ~/.config/ns/config.json + token.json
 # Also copy in: ~/.local/bin/devbox (binary), ~/agent-workspace/CLAUDE.md
 set -e
+export GIT_TERMINAL_PROMPT=0   # GitHub sometimes challenges anonymous fetches; fail fast, retry below
 REPO=https://github.com/zaz/namespace-bot-zulip.git
 BRANCH=${HEAD_BRANCH:-feat/claude-code-fleet}
 cd /home/devbox
 mkdir -p .local/bin zulip-ai-bot .config/ns agent-workspace .namespace/ssh
 if [ ! -d shell-bot/.git ]; then
   # A pre-placed ~/shell-bot/.env (secrets arrive before code) must survive the clone.
-  git clone -q -b "$BRANCH" "$REPO" shell-bot.new
+  for i in 1 2 3 4 5 6; do git clone -q -b "$BRANCH" "$REPO" shell-bot.new && break; rm -rf shell-bot.new; sleep 5; done
+  [ -d shell-bot.new/.git ] || { echo "clone failed after retries"; exit 1; }
   [ -d shell-bot ] && cp -a shell-bot/. shell-bot.new/
   rm -rf shell-bot && mv shell-bot.new shell-bot
 fi
 cd shell-bot
-git fetch -q && git checkout -q "$BRANCH" && git pull -q --ff-only
+for i in 1 2 3 4 5; do git fetch -q && break || sleep 5; done
+git checkout -q "$BRANCH"; git pull -q --ff-only 2>/dev/null || echo "bootstrap-head: pull skipped (GitHub unreachable); using local checkout"
 [ -x .venv/bin/python ] || python3 -m venv .venv
 .venv/bin/pip install -q -r requirements.txt zulip anthropic
 chmod +x infra/*.sh infra/fleet-exec 2>/dev/null || true
