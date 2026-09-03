@@ -2,7 +2,7 @@
 # watch-head.sh — runs on fleet-workhorse. Every minute: ssh to the head (this wakes a
 # stopped devbox and counts as activity), start the bot supervisor if the bot is down,
 # and make sure the head's reverse watchdog is running. Nothing depends on a laptop.
-HEAD=${HEAD_BOX:-zulip-head.devbox.namespace}
+HEAD=${HEAD_BOX:-zulip-bot-head.devbox.namespace}
 LOG=/home/devbox/watch-head.log
 LOCK=/home/devbox/.watch-head.pid
 if [ -f "$LOCK" ]; then o=$(cat "$LOCK"); kill -0 "$o" 2>/dev/null && grep -q watch-head "/proc/$o/cmdline" 2>/dev/null && { echo "already running ($o)"; exit 0; }; fi

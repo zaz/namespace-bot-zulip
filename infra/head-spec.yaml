@@ -1,0 +1,14 @@
+# Devbox spec for the Zulip bot head. Create with:
+#   devbox create --from infra/head-spec.yaml --access_mode shared --no_checkout \
+#     --image_ref public.registry.namespace.systems/namespacelabs.dev/internal/devbox/userimages/base@sha256:dca57691fa2bd8f72e32a98ee38a796bd2011bbc38d2b8530cd73462070f4812
+# `sessions` are started by the platform on EVERY boot, so the bot and its
+# watchdog come back by themselves after the periodic instance restarts.
+# Each command waits until bootstrap-head.sh has put the scripts in place.
+name: zulip-bot-head
+image: builtin:base
+size: s
+sessions:
+  - name: bot
+    command: bash -c 'while [ ! -x /home/devbox/shell-bot/run-forever.sh ]; do sleep 20; done; exec /home/devbox/shell-bot/run-forever.sh'
+  - name: watchdog
+    command: bash -c 'while [ ! -x /home/devbox/watch-workhorse.sh ]; do sleep 20; done; exec /home/devbox/watch-workhorse.sh'
