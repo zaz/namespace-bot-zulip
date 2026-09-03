@@ -65,3 +65,30 @@ def reply_target(message: dict, text: str) -> dict:
         "topic": message["subject"],
         "content": text,
     }
+
+
+def send_long(message: dict, text: str, limit: int = 9000) -> None:
+    """Post a reply, splitting it into several Zulip messages if it is long.
+
+    Zulip caps a message at 10,000 characters. Split on paragraph boundaries
+    where possible and never drop content: long agent reports often carry
+    the question or the key result at the end.
+    """
+    chunks, buf = [], ""
+    for para in text.split("\n\n"):
+        cand = (buf + "\n\n" + para) if buf else para
+        if len(cand) <= limit:
+            buf = cand
+            continue
+        if buf:
+            chunks.append(buf)
+        while len(para) > limit:
+            chunks.append(para[:limit])
+            para = para[limit:]
+        buf = para
+    if buf:
+        chunks.append(buf)
+    n = len(chunks)
+    for i, chunk in enumerate(chunks, 1):
+        suffix = f"\n\n*(part {i}/{n})*" if n > 1 else ""
+        safe_send(reply_target(message, chunk + suffix))

@@ -14,12 +14,11 @@ from .config import (
     CLAUDE_PREFIX,
     COMMAND_PREFIX,
     FLEET_PREFIX,
-    MAX_OUTPUT,
     fleet_ack,
 )
 from .fleet_mode import reset_fleet_session, run_fleet
 from .shell_mode import format_reply, reset_session, run_in_thread
-from .zulip_io import BOT_ID, reply_target, safe_send, strip_mention, thread_key
+from .zulip_io import BOT_ID, reply_target, safe_send, send_long, strip_mention, thread_key
 
 
 def handle_message(message: dict) -> None:
@@ -109,7 +108,7 @@ def handle_message(message: dict) -> None:
                 reply = run_agent(key, body)
             except Exception as exc:  # pragma: no cover - defensive
                 reply = f"[agent error: {exc}]"
-            safe_send(reply_target(message, reply))
+            send_long(message, reply)
 
         threading.Thread(target=_run_and_reply, daemon=True).start()
         return
@@ -137,9 +136,7 @@ def handle_message(message: dict) -> None:
                 reply = run_fleet(key, body)
             except Exception as exc:  # pragma: no cover - defensive
                 reply = f"[fleet error: {exc}]"
-            if len(reply) > MAX_OUTPUT:
-                reply = reply[:MAX_OUTPUT] + "\n[output truncated]"
-            safe_send(reply_target(message, reply))
+            send_long(message, reply)
 
         threading.Thread(target=_run_fleet_and_reply, daemon=True).start()
         return
