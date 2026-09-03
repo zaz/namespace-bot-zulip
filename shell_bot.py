@@ -636,9 +636,40 @@ def run_agent(key: str, prompt: str) -> str:
     return text or "[the agent finished with no message]"
 
 
-# One Claude Code session id per thread, LRU-ordered.
+# One Claude Code session id per thread, LRU-ordered. Persisted to disk so a
+# bot restart (deploys, platform instance restarts) doesn't make every thread
+# forget its conversation — the transcripts themselves live on the fleet host.
 FLEET_SESSIONS: "collections.OrderedDict[str, str]" = collections.OrderedDict()
 FLEET_SESSIONS_LOCK = threading.Lock()
+FLEET_SESSIONS_FILE = os.environ.get(
+    "SHELL_BOT_FLEET_SESSIONS_FILE",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), ".fleet-sessions.json"),
+)
+
+
+def _load_fleet_sessions() -> None:
+    try:
+        with open(FLEET_SESSIONS_FILE) as fh:
+            data = json.load(fh)
+        for k, v in data.items():
+            if isinstance(k, str) and isinstance(v, str):
+                FLEET_SESSIONS[k] = v
+    except (OSError, ValueError):
+        pass
+
+
+def _save_fleet_sessions() -> None:
+    """Write the map atomically; called with FLEET_SESSIONS_LOCK held."""
+    try:
+        tmp = FLEET_SESSIONS_FILE + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump(dict(FLEET_SESSIONS), fh)
+        os.replace(tmp, FLEET_SESSIONS_FILE)
+    except OSError:
+        pass
+
+
+_load_fleet_sessions()
 
 
 def fleet_configured() -> bool:
@@ -648,6 +679,7 @@ def fleet_configured() -> bool:
 def reset_fleet_session(key: str) -> None:
     with FLEET_SESSIONS_LOCK:
         FLEET_SESSIONS.pop(key, None)
+        _save_fleet_sessions()
 
 
 def run_fleet(key: str, task: str) -> str:
@@ -703,6 +735,7 @@ def run_fleet(key: str, task: str) -> str:
             FLEET_SESSIONS.move_to_end(key)
             while len(FLEET_SESSIONS) > FLEET_MAX_SESSIONS:
                 FLEET_SESSIONS.popitem(last=False)
+            _save_fleet_sessions()
 
     return reply or "[the fleet agent finished with no message]"
 
