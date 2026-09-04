@@ -91,6 +91,10 @@ FLEET_BIN = os.environ.get("SHELL_BOT_FLEET_BIN", "claude")
 FLEET_CWD = os.environ.get("SHELL_BOT_FLEET_CWD") or CWD
 FLEET_TIMEOUT = int(os.environ.get("SHELL_BOT_FLEET_TIMEOUT", "600"))
 FLEET_MAX_SESSIONS = int(os.environ.get("SHELL_BOT_FLEET_MAX_SESSIONS", "100"))
+# Host to fetch agent-produced attachments from (the agent runs there and has
+# no Zulip credentials). Empty = attachments are local files on this host.
+FLEET_ATTACH_HOST = os.environ.get("SHELL_BOT_FLEET_ATTACH_HOST", "")
+FLEET_ATTACH_MAX_BYTES = int(os.environ.get("SHELL_BOT_FLEET_ATTACH_MAX_BYTES", str(25 * 1024 * 1024)))
 
 # Claude Code needs the Anthropic credentials that SHELL_ENV deliberately
 # strips; pass those through, but keep the Zulip key and bot config hidden.

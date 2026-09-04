@@ -1,11 +1,14 @@
 """Zulip client, thread identity, and reply plumbing."""
 
+import io
 import os
+import re
+import subprocess
 import threading
 
 import zulip
 
-from .config import ZULIPRC
+from .config import FLEET_ATTACH_HOST, FLEET_ATTACH_MAX_BYTES, ZULIPRC
 
 
 def make_client() -> zulip.Client:
@@ -92,3 +95,37 @@ def send_long(message: dict, text: str, limit: int = 9000) -> None:
     for i, chunk in enumerate(chunks, 1):
         suffix = f"\n\n*(part {i}/{n})*" if n > 1 else ""
         safe_send(reply_target(message, chunk + suffix))
+
+
+_ATTACH_RE = re.compile(r"^\s*ATTACH:\s*(\S+)\s*$", re.MULTILINE)
+
+
+def attach_files(text: str) -> str:
+    """Replace `ATTACH: /abs/path` lines with Zulip upload links (see prod shell_bot.py)."""
+    def _fetch(path):
+        try:
+            if FLEET_ATTACH_HOST:
+                proc = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=60",
+                                       FLEET_ATTACH_HOST, "cat", path], capture_output=True, timeout=120)
+                return proc.stdout if proc.returncode == 0 else None
+            with open(path, "rb") as fh:
+                return fh.read()
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    def _repl(m):
+        path = m.group(1); data = _fetch(path)
+        if data is None:
+            return f"*(attachment `{path}` could not be fetched)*"
+        if len(data) > FLEET_ATTACH_MAX_BYTES:
+            return f"*(attachment `{path}` too large: {len(data)} bytes)*"
+        name = os.path.basename(path)
+        try:
+            fh = io.BytesIO(data); fh.name = name
+            res = client.upload_file(fh)
+            uri = res.get("url") or res.get("uri")
+            return f"[{name}]({uri})" if uri else f"*(upload of `{name}` failed: {res.get('msg', 'no url')})*"
+        except Exception as exc:
+            return f"*(upload of `{name}` failed: {exc})*"
+
+    return _ATTACH_RE.sub(_repl, text)

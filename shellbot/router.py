@@ -18,7 +18,7 @@ from .config import (
 )
 from .fleet_mode import reset_fleet_session, run_fleet
 from .shell_mode import format_reply, reset_session, run_in_thread
-from .zulip_io import BOT_ID, reply_target, safe_send, send_long, strip_mention, thread_key
+from .zulip_io import BOT_ID, attach_files, reply_target, safe_send, send_long, strip_mention, thread_key
 
 
 def handle_message(message: dict) -> None:
@@ -136,6 +136,8 @@ def handle_message(message: dict) -> None:
                 reply = run_fleet(key, body)
             except Exception as exc:  # pragma: no cover - defensive
                 reply = f"[fleet error: {exc}]"
+            if "ATTACH:" in reply:
+                reply = attach_files(reply)
             send_long(message, reply)
 
         threading.Thread(target=_run_fleet_and_reply, daemon=True).start()
