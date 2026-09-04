@@ -7,9 +7,11 @@
 #     --grant '{"resource_type":"devbox","resource_id":"*","actions":["activate","fetch","list"]}' \
 #     --token_file token.json
 name: wake-devboxes
+# SCHEDULE DISABLED until the NSC_TOKEN_JSON repository secret exists — without it
+# every run fails and GitHub emails the repo owner each time. To enable, restore:
+#   schedule:
+#     - cron: "*/10 * * * *"
 on:
-  schedule:
-    - cron: "*/5 * * * *"
   workflow_dispatch:
 jobs:
   wake:
@@ -21,9 +23,15 @@ jobs:
         with:
           node-version: 20
       - run: npm install --no-audit --no-fund @namespacelabs/sdk
-      - run: printf '%s' "$NSC_TOKEN_JSON" > "$RUNNER_TEMP/token.json"
+      - name: Require the token secret (skip quietly if absent)
+        run: |
+          if [ -z "$NSC_TOKEN_JSON" ]; then echo "NSC_TOKEN_JSON secret not set; nothing to do"; exit 0; fi
+          printf '%s' "$NSC_TOKEN_JSON" > "$RUNNER_TEMP/token.json"
         env:
           NSC_TOKEN_JSON: ${{ secrets.NSC_TOKEN_JSON }}
+      - name: Wake devboxes
+        if: ${{ env.HAVE_TOKEN == 'true' }}
+        run: echo unused
       - run: node infra/wake-devboxes.mjs
         env:
           NSC_TOKEN_FILE: ${{ runner.temp }}/token.json
