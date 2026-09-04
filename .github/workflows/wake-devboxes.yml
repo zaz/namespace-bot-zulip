@@ -1,38 +1,42 @@
-# Second, Namespace-independent leg of the bot's self-healing: every 5 minutes,
-# start the head and workhorse devboxes if the platform stopped them (this
-# workspace stops every instance 3h after boot; a stopped devbox only restarts
-# on a connection/start call). Needs repository secret NSC_TOKEN_JSON = the
-# contents of a token file from:
+# Namespace-independent wake-up for the bot's devboxes (this workspace stops
+# every instance 3h after boot; a stopped devbox only restarts on a start call).
+#
+# Design rule: this workflow must NEVER fail for configuration or transient
+# platform reasons — a failed run emails the repo owner. Problems are logged
+# in the run output and surface through the bot being unresponsive instead.
+#
+# SCHEDULE DISABLED until the NSC_TOKEN_JSON repository secret exists. Create
+# the secret from a scoped token file:
 #   nsc token create --user --name zulip-pinger --expires_in 365d \
 #     --grant '{"resource_type":"devbox","resource_id":"*","actions":["activate","fetch","list"]}' \
 #     --token_file token.json
-name: wake-devboxes
-# SCHEDULE DISABLED until the NSC_TOKEN_JSON repository secret exists — without it
-# every run fails and GitHub emails the repo owner each time. To enable, restore:
+# then restore:
 #   schedule:
 #     - cron: "*/10 * * * *"
+name: wake-devboxes
 on:
   workflow_dispatch:
 jobs:
   wake:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 5
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm install --no-audit --no-fund @namespacelabs/sdk
-      - name: Require the token secret (skip quietly if absent)
-        run: |
-          if [ -z "$NSC_TOKEN_JSON" ]; then echo "NSC_TOKEN_JSON secret not set; nothing to do"; exit 0; fi
-          printf '%s' "$NSC_TOKEN_JSON" > "$RUNNER_TEMP/token.json"
+      - name: Wake devboxes (never fails the run)
         env:
           NSC_TOKEN_JSON: ${{ secrets.NSC_TOKEN_JSON }}
-      - name: Wake devboxes
-        if: ${{ env.HAVE_TOKEN == 'true' }}
-        run: echo unused
-      - run: node infra/wake-devboxes.mjs
-        env:
-          NSC_TOKEN_FILE: ${{ runner.temp }}/token.json
           BOXES: zulip-bot-head,fleet-workhorse
+        run: |
+          set +e
+          if [ -z "$NSC_TOKEN_JSON" ]; then
+            echo "::notice::NSC_TOKEN_JSON secret not set; nothing to do"
+            exit 0
+          fi
+          printf '%s' "$NSC_TOKEN_JSON" > "$RUNNER_TEMP/token.json"
+          npm install --no-audit --no-fund --silent @namespacelabs/sdk || { echo "::warning::npm install failed; skipping"; exit 0; }
+          NSC_TOKEN_FILE="$RUNNER_TEMP/token.json" node infra/wake-devboxes.mjs || echo "::warning::wake script reported errors (see log above)"
+          exit 0
