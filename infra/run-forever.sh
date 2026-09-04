@@ -1,18 +1,12 @@
 #!/bin/bash
-# run-forever.sh — supervisor for the Zulip shell bot (no systemd on devboxes).
-# Restarts the bot if it exits/crashes. Idempotent: refuses to start twice.
-LOCK=/home/devbox/shell-bot/.supervisor.pid
-if [ -f "$LOCK" ]; then
-  old=$(cat "$LOCK")
-  # Only honour the lock if that pid is really a supervisor (pids recycle after reboot).
-  if kill -0 "$old" 2>/dev/null && grep -q run-forever "/proc/$old/cmdline" 2>/dev/null; then
-    echo "supervisor already running (pid $old)"; exit 0
-  fi
-fi
-echo $$ > "$LOCK"
+# run-forever.sh — supervisor for the Zulip shell bot (started by the devbox spec's
+# `bot` session on every boot). Restarts the bot if it exits. Single instance is
+# enforced with flock (pid files misfire after reboots: pids recycle and the tmux
+# wrapper's own command line mentions this script).
+exec 9>/home/devbox/shell-bot/.supervisor.lock
+flock -n 9 || { echo "supervisor already running"; exit 0; }
 cd /home/devbox/shell-bot || exit 1
-# Namespace idle detection: any file under /.namespace/tasks marks the devbox busy,
-# so it is never auto-stopped while the bot service is meant to be running.
+# Namespace idle detection: any file under /.namespace/tasks marks the devbox busy.
 mkdir -p /.namespace/tasks 2>/dev/null; echo 'zulip bot service' > /.namespace/tasks/zulip-bot 2>/dev/null
 export PATH="/home/devbox/.local/bin:$PATH"
 while true; do
