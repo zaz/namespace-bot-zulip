@@ -189,6 +189,10 @@ FLEET_BIN = os.environ.get("SHELL_BOT_FLEET_BIN", "claude")
 FLEET_CWD = os.environ.get("SHELL_BOT_FLEET_CWD") or CWD
 FLEET_TIMEOUT = int(os.environ.get("SHELL_BOT_FLEET_TIMEOUT", "600"))
 FLEET_MAX_SESSIONS = int(os.environ.get("SHELL_BOT_FLEET_MAX_SESSIONS", "100"))
+# Host to fetch agent-produced attachments from (the agent runs there and has
+# no Zulip credentials). Empty = attachments are local files on this host.
+FLEET_ATTACH_HOST = os.environ.get("SHELL_BOT_FLEET_ATTACH_HOST", "")
+FLEET_ATTACH_MAX_BYTES = int(os.environ.get("SHELL_BOT_FLEET_ATTACH_MAX_BYTES", str(25 * 1024 * 1024)))
 
 # Claude Code needs the Anthropic credentials that SHELL_ENV deliberately
 # strips; pass those through, but keep the Zulip key and bot config hidden.
@@ -236,6 +240,53 @@ _raw_send = client.send_message
 def safe_send(request: dict):
     with SEND_LOCK:
         return _raw_send(request)
+
+
+_ATTACH_RE = re.compile(r"^\s*ATTACH:\s*(\S+)\s*$", re.MULTILINE)
+
+
+def attach_files(text: str) -> str:
+    """Replace `ATTACH: /abs/path` lines with Zulip upload links.
+
+    The agent (on the fleet host) writes a file and prints that line; this
+    host fetches it over ssh (or reads it locally) and uploads it with the
+    bot's Zulip credentials, which never leave this host.
+    """
+    def _fetch(path: str) -> "bytes | None":
+        try:
+            if FLEET_ATTACH_HOST:
+                proc = subprocess.run(
+                    ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=60",
+                     FLEET_ATTACH_HOST, "cat", path],
+                    capture_output=True, timeout=120,
+                )
+                return proc.stdout if proc.returncode == 0 else None
+            with open(path, "rb") as fh:
+                return fh.read()
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    def _repl(m: "re.Match") -> str:
+        path = m.group(1)
+        data = _fetch(path)
+        if data is None:
+            return f"*(attachment `{path}` could not be fetched)*"
+        if len(data) > FLEET_ATTACH_MAX_BYTES:
+            return f"*(attachment `{path}` too large: {len(data)} bytes)*"
+        name = os.path.basename(path)
+        try:
+            import io
+            fh = io.BytesIO(data)
+            fh.name = name
+            res = client.upload_file(fh)
+            uri = res.get("url") or res.get("uri")
+            if not uri:
+                return f"*(upload of `{name}` failed: {res.get('msg', 'no url')})*"
+            return f"[{name}]({uri})"
+        except Exception as exc:  # pragma: no cover - network
+            return f"*(upload of `{name}` failed: {exc})*"
+
+    return _ATTACH_RE.sub(_repl, text)
 
 
 def send_long(message: dict, text: str, limit: int = 9000) -> None:
@@ -891,6 +942,8 @@ def handle_message(message: dict) -> None:
                 reply = run_fleet(key, body)
             except Exception as exc:  # pragma: no cover - defensive
                 reply = f"[fleet error: {exc}]"
+            if "ATTACH:" in reply:
+                reply = attach_files(reply)
             send_long(message, reply)
 
         threading.Thread(target=_run_fleet_and_reply, daemon=True).start()
