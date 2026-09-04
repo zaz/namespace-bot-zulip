@@ -8,3 +8,5 @@ __pycache__/
 .venv/
 .fleet-sessions.json
 .fleet-sessions.json.tmp
+.last-seen-id
+.last-seen-id.tmp

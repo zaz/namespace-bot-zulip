@@ -692,6 +692,10 @@ def run_agent(key: str, prompt: str) -> str:
 # forget its conversation — the transcripts themselves live on the fleet host.
 FLEET_SESSIONS: "collections.OrderedDict[str, str]" = collections.OrderedDict()
 FLEET_SESSIONS_LOCK = threading.Lock()
+LAST_SEEN_FILE = os.environ.get(
+    "SHELL_BOT_LAST_SEEN_FILE",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), ".last-seen-id"),
+)
 FLEET_SESSIONS_FILE = os.environ.get(
     "SHELL_BOT_FLEET_SESSIONS_FILE",
     os.path.join(os.path.dirname(os.path.abspath(__file__)), ".fleet-sessions.json"),
@@ -827,7 +831,45 @@ def format_reply(command: str, output: str) -> str:
     return f"`$ {command}`\n```\n{output}\n```"
 
 
+def _remember_seen(message_id: int) -> None:
+    try:
+        tmp = LAST_SEEN_FILE + ".tmp"
+        with open(tmp, "w") as fh:
+            fh.write(str(message_id))
+        os.replace(tmp, LAST_SEEN_FILE)
+    except OSError:
+        pass
+
+
+def catch_up_missed_messages() -> None:
+    """Handle messages that arrived while the bot was down.
+
+    The platform stops this box periodically and it takes a minute or two to
+    be woken; mentions in that window would otherwise be silently lost.
+    """
+    try:
+        with open(LAST_SEEN_FILE) as fh:
+            last_id = int(fh.read().strip())
+    except (OSError, ValueError):
+        return
+    try:
+        res = client.get_messages({"anchor": last_id, "num_before": 0,
+                                   "num_after": 200, "apply_markdown": False})
+    except Exception as exc:  # pragma: no cover - network
+        print(f"catch-up failed: {exc}", flush=True)
+        return
+    missed = [m for m in res.get("messages", []) if m["id"] > last_id]
+    if missed:
+        print(f"catching up on {len(missed)} message(s) missed while down", flush=True)
+    for m in missed:
+        try:
+            handle_message(m)
+        except Exception as exc:  # pragma: no cover - defensive
+            print(f"catch-up: error handling message {m['id']}: {exc}", flush=True)
+
+
 def handle_message(message: dict) -> None:
+    _remember_seen(message["id"])
     # Ignore our own messages to avoid loops.
     if message["sender_id"] == BOT_ID:
         return
@@ -1010,6 +1052,7 @@ def main() -> None:
               f"cwd {FLEET_CWD or os.getcwd()}.")
     else:
         print(f"Claude Code fleet mode disabled ('{FLEET_BIN}' not on PATH).")
+    catch_up_missed_messages()
     client.call_on_each_message(handle_message)
 
 
