@@ -12,3 +12,5 @@ sessions:
     command: bash -c 'while [ ! -x /home/devbox/shell-bot/run-forever.sh ]; do sleep 20; done; exec /home/devbox/shell-bot/run-forever.sh'
   - name: watchdog
     command: bash -c 'while [ ! -x /home/devbox/watch-workhorse.sh ]; do sleep 20; done; exec /home/devbox/watch-workhorse.sh'
+  - name: graceful
+    command: bash -c 'while [ ! -x /home/devbox/graceful-restart.sh ]; do sleep 20; done; exec /home/devbox/graceful-restart.sh'

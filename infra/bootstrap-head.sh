@@ -27,6 +27,7 @@ chmod +x infra/*.sh infra/fleet-exec 2>/dev/null || true
 cp infra/run-forever.sh /home/devbox/shell-bot/run-forever.sh
 cp infra/fleet-exec /home/devbox/.local/bin/fleet-exec
 cp infra/watch-workhorse.sh /home/devbox/watch-workhorse.sh
-chmod +x /home/devbox/shell-bot/run-forever.sh /home/devbox/.local/bin/fleet-exec /home/devbox/watch-workhorse.sh
+cp infra/graceful-restart.sh /home/devbox/graceful-restart.sh
+chmod +x /home/devbox/shell-bot/run-forever.sh /home/devbox/.local/bin/fleet-exec /home/devbox/watch-workhorse.sh /home/devbox/graceful-restart.sh
 [ -x /home/devbox/.local/bin/claude ] || curl -fsSL https://claude.ai/install.sh | bash >/dev/null
 echo "bootstrap-head: done (secrets present: $(ls .env ../zulip-ai-bot/zuliprc ../.config/ns/token.json 2>/dev/null | wc -l)/3)"

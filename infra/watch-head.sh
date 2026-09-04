@@ -16,7 +16,8 @@ mkdir -p /.namespace/tasks 2>/dev/null; echo 'fleet watchdog' > /.namespace/task
 while true; do
   out=$(timeout 240 ssh -o BatchMode=yes -o ConnectTimeout=120 -o StrictHostKeyChecking=no "$HEAD" '
     if flock -n /home/devbox/shell-bot/.supervisor.lock true 2>/dev/null; then setsid nohup /home/devbox/shell-bot/run-forever.sh >/dev/null 2>&1 & echo BOT-RESTARTED; else echo BOT-UP; fi
-    if flock -n /home/devbox/.watch-workhorse.lock true 2>/dev/null; then setsid nohup /home/devbox/watch-workhorse.sh >/dev/null 2>&1 & echo WD-RESTARTED; else echo WD-UP; fi' 2>&1)
+    if flock -n /home/devbox/.watch-workhorse.lock true 2>/dev/null; then setsid nohup /home/devbox/watch-workhorse.sh >/dev/null 2>&1 & echo WD-RESTARTED; else echo WD-UP; fi
+    if [ -x /home/devbox/graceful-restart.sh ] && flock -n /home/devbox/.graceful-restart.lock true 2>/dev/null; then setsid nohup /home/devbox/graceful-restart.sh >/dev/null 2>&1 & echo GR-RESTARTED; fi' 2>&1)
   case "$out" in
     *RESTARTED*) echo "$(date -Is) $(echo "$out" | tr '\n' ' ')" >> "$LOG" ;;
     *BOT-UP*) ;;
